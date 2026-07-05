@@ -1,4 +1,4 @@
-import { Encoder } from '@garmin/fitsdk';
+import { Encoder, CrcCalculator } from '@garmin/fitsdk';
 import type { FitModel, FitMesg } from './model';
 
 /**
@@ -23,6 +23,30 @@ function withoutEmptyFields(mesg: FitMesg): FitMesg {
   return cleaned;
 }
 
+/**
+ * Works around a bug in @garmin/fitsdk's `Encoder`: it writes the FIT
+ * header's Protocol Version byte as the literal decimal value `2`, instead
+ * of the spec's nibble-packed encoding (major version in the high nibble,
+ * minor in the low nibble — protocol 2.0 is `0x20`, the same scheme every
+ * real Garmin device uses, e.g. `0x10` for protocol 1.0). Confirmed against
+ * a real Garmin Edge file: the device wrote `0x10`; this SDK's encoder
+ * writes `0x02` — not a valid protocol version identifier, and Garmin
+ * Connect's own upload validation silently rejects the file over it even
+ * though every other part of it decodes without error. Patches the byte in
+ * place and recomputes the header and file CRCs, both of which cover it.
+ */
+function fixProtocolVersionByte(bytes: Uint8Array): Uint8Array {
+  const fixed = new Uint8Array(bytes);
+  const headerSize = fixed[0];
+  fixed[1] = 0x20;
+
+  const view = new DataView(fixed.buffer, fixed.byteOffset, fixed.byteLength);
+  view.setUint16(headerSize - 2, CrcCalculator.calculateCRC(fixed, 0, headerSize - 2), true);
+  view.setUint16(fixed.length - 2, CrcCalculator.calculateCRC(fixed, 0, fixed.length - 2), true);
+
+  return fixed;
+}
+
 /** Encodes a {@link FitModel} back into FIT file bytes, writing messages in model order. */
 export function encodeFitFile(model: FitModel): Uint8Array {
   const encoder = new Encoder();
@@ -35,5 +59,5 @@ export function encodeFitFile(model: FitModel): Uint8Array {
     if (Object.keys(cleaned).length === 0) continue;
     encoder.onMesg(mesgNum, cleaned);
   }
-  return encoder.close();
+  return fixProtocolVersionByte(encoder.close());
 }

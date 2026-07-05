@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Profile } from '@garmin/fitsdk';
+import { CrcCalculator, Profile } from '@garmin/fitsdk';
 import { decodeFitFile } from './decode';
 import { encodeFitFile } from './encode';
 import type { FitModel } from './model';
@@ -122,5 +122,28 @@ describe('FIT decode/encode round-trip', () => {
     const lap = decoded.entries[0].mesg as Record<string, unknown>;
     expect(lap.totalGrit).toBeUndefined();
     expect(lap.totalElapsedTime).toBe(60);
+  });
+
+  it('writes a spec-compliant protocol version byte, not the SDK encoder default', () => {
+    // Regression test: @garmin/fitsdk's Encoder writes header byte 1 as the
+    // literal decimal 2 instead of the nibble-packed 0x20 every real Garmin
+    // device uses for protocol 2.0 — an invalid version identifier that
+    // Garmin Connect's own upload validation rejects the whole file over.
+    // See encode.ts's fixProtocolVersionByte.
+    const model = buildSampleModel();
+    const bytes = encodeFitFile(model);
+
+    expect(bytes[1]).toBe(0x20);
+
+    const headerSize = bytes[0];
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const storedHeaderCrc = view.getUint16(headerSize - 2, true);
+    expect(storedHeaderCrc).toBe(CrcCalculator.calculateCRC(bytes, 0, headerSize - 2));
+
+    const storedFileCrc = view.getUint16(bytes.length - 2, true);
+    expect(storedFileCrc).toBe(CrcCalculator.calculateCRC(bytes, 0, bytes.length - 2));
+
+    const { errors } = decodeFitFile(bytes.buffer as ArrayBuffer);
+    expect(errors).toEqual([]);
   });
 });

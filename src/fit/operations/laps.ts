@@ -147,9 +147,24 @@ function finalizeLaps(laps: FitMesg[]): FitMesg[] {
  * convention most FIT readers rely on for lap/record grouping. Also patches
  * any session message's `numLaps` to match, since add/delete change the lap
  * count.
+ *
+ * Also drops any `time_in_zone` message that references a `lap` (as opposed
+ * to `session` or `split`): those hold a per-lap HR/power zone time
+ * breakdown computed by the device for the *old* lap boundaries. Once laps
+ * are added, moved, or deleted, that breakdown no longer corresponds to the
+ * lap it's indexed against — found against a real Garmin Edge file where a
+ * lap split left a `time_in_zone` message claiming more zone-time for lap 0
+ * than lap 0's own `total_elapsed_time`, an internally-inconsistent file
+ * that Garmin Connect silently refused to import. There's no honest way to
+ * recompute this breakdown from record data (zone boundaries aren't stored
+ * per-record), so it's dropped rather than left stale.
  */
 function rebuildWithLaps(model: FitModel, newLaps: FitMesg[]): FitModel {
-  const withoutLaps = model.entries.filter((e) => e.mesgNum !== Profile.MesgNum.LAP);
+  const withoutLaps = model.entries.filter(
+    (e) =>
+      e.mesgNum !== Profile.MesgNum.LAP &&
+      !(e.mesgNum === Profile.MesgNum.TIME_IN_ZONE && e.mesg.referenceMesg === 'lap'),
+  );
   const sorted = [...newLaps].sort((a, b) => (a.timestamp as Date).getTime() - (b.timestamp as Date).getTime());
 
   const result: FitMesgEntry[] = [];

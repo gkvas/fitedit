@@ -136,6 +136,41 @@ describe('deleteLap', () => {
   });
 });
 
+describe('stale lap-referenced time_in_zone messages', () => {
+  function withTimeInZone(): FitModel {
+    const model = twoLapModel();
+    return {
+      entries: [
+        ...model.entries,
+        { mesgNum: Profile.MesgNum.TIME_IN_ZONE, mesg: { referenceMesg: 'session', referenceIndex: 0 } },
+        { mesgNum: Profile.MesgNum.TIME_IN_ZONE, mesg: { referenceMesg: 'lap', referenceIndex: 0 } },
+        { mesgNum: Profile.MesgNum.TIME_IN_ZONE, mesg: { referenceMesg: 'lap', referenceIndex: 1 } },
+        { mesgNum: Profile.MesgNum.TIME_IN_ZONE, mesg: { referenceMesg: 'split', referenceIndex: 0 } },
+      ],
+    };
+  }
+
+  function timeInZones(model: FitModel) {
+    return model.entries.filter((e) => e.mesgNum === Profile.MesgNum.TIME_IN_ZONE).map((e) => e.mesg);
+  }
+
+  it('drops lap-referenced entries (stale after the lap layout changes) but keeps session/split ones', () => {
+    const result = moveLapBoundary(withTimeInZone(), 0, at(40));
+    const remaining = timeInZones(result);
+    expect(remaining.map((m) => m.referenceMesg)).toEqual(['session', 'split']);
+  });
+
+  it('drops stale lap-referenced entries on add', () => {
+    const result = addLapBoundary(withTimeInZone(), at(20));
+    expect(timeInZones(result).some((m) => m.referenceMesg === 'lap')).toBe(false);
+  });
+
+  it('drops stale lap-referenced entries on delete', () => {
+    const result = deleteLap(withTimeInZone(), 0);
+    expect(timeInZones(result).some((m) => m.referenceMesg === 'lap')).toBe(false);
+  });
+});
+
 describe('records stay grouped with the lap message that follows them', () => {
   it('places each lap message right after its last record', () => {
     const result = moveLapBoundary(twoLapModel(), 0, at(40));

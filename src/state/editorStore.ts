@@ -9,6 +9,10 @@ const MAX_HISTORY = 50;
 interface EditorState {
   fileName: string | null;
   model: FitModel | null;
+  /** The unmodified bytes of the loaded file — the base for byte-level export. */
+  originalBytes: Uint8Array | null;
+  /** The model as decoded at load time, used to derive what changed at export. */
+  originalModel: FitModel | null;
   error: string | null;
   loading: boolean;
   past: FitModel[];
@@ -23,6 +27,8 @@ interface EditorState {
 export const useEditorStore = create<EditorState>((set, get) => ({
   fileName: null,
   model: null,
+  originalBytes: null,
+  originalModel: null,
   error: null,
   loading: false,
   past: [],
@@ -37,7 +43,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         set({ loading: false, error: `Decoded with errors: ${errors.map((e) => e.message).join(', ')}` });
         return;
       }
-      set({ model, fileName: file.name, loading: false, error: null, past: [], future: [] });
+      set({
+        model,
+        originalBytes: new Uint8Array(buffer),
+        originalModel: model,
+        fileName: file.name,
+        loading: false,
+        error: null,
+        past: [],
+        future: [],
+      });
     } catch (err) {
       const message = err instanceof InvalidFitFileError ? err.message : `Failed to read file: ${String(err)}`;
       set({ loading: false, error: message });
@@ -68,6 +83,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   clear() {
-    set({ model: null, fileName: null, error: null, past: [], future: [] });
+    set({ model: null, originalBytes: null, originalModel: null, fileName: null, error: null, past: [], future: [] });
   },
 }));

@@ -13,18 +13,19 @@ export interface ProductOption {
 // A curated subset of Profile.types.manufacturer — the full enum has ~150
 // entries, most of them obscure sensor/OEM vendors nobody hand-picks from a
 // dropdown. These are the manufacturers whose activity files a user is
-// actually likely to want to relabel between.
+// actually likely to want to relabel between. Keys must match the SDK's
+// camelCase enum names exactly (they're validated against the profile below).
 const CURATED_MANUFACTURERS: Record<string, string> = {
   garmin: 'Garmin',
-  wahoo_fitness: 'Wahoo',
+  wahooFitness: 'Wahoo',
   zwift: 'Zwift',
   hammerhead: 'Hammerhead',
   quarq: 'Quarq',
-  favero_electronics: 'Favero',
-  polar: 'Polar',
+  faveroElectronics: 'Favero',
+  polarElectro: 'Polar',
   suunto: 'Suunto',
-  sigma_sport: 'Sigma Sport',
-  stages_cycling: 'Stages',
+  sigmasport: 'Sigma Sport',
+  stagesCycling: 'Stages',
   tacx: 'Tacx',
   saris: 'Saris',
 };
