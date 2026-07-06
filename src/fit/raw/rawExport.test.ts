@@ -7,7 +7,6 @@ import { decodeFitFile } from '../decode';
 import { encodeFitFile } from '../encode';
 import { parseRawFit } from './parse';
 import { exportEditedFit } from './export';
-import { shiftTime } from '../operations/shiftTime';
 import { addLapBoundary } from '../operations/laps';
 import { changeDevice } from '../operations/device';
 import type { FitModel, FitMesg } from '../model';
@@ -101,19 +100,6 @@ describe('exportEditedFit', () => {
     expect(Buffer.from(out).equals(Buffer.from(bytes))).toBe(true);
   });
 
-  it('shifts every timestamp without changing file size', () => {
-    const bytes = sampleBytes();
-    const model = decodeBytes(bytes);
-    const out = exportEditedFit(bytes, model, shiftTime(model, 3600));
-    expect(out.length).toBe(bytes.length);
-
-    const decoded = decodeBytes(out);
-    const fileId = decoded.entries.find((e) => e.mesgNum === Profile.MesgNum.FILE_ID)!.mesg;
-    expect((fileId.timeCreated as Date).toISOString()).toBe('2026-07-01T11:00:00.000Z');
-    const record = decoded.entries.find((e) => e.mesgNum === Profile.MesgNum.RECORD)!.mesg;
-    expect((record.timestamp as Date).toISOString()).toBe('2026-07-01T11:00:00.000Z');
-  });
-
   it('patches file_id manufacturer/product in place', () => {
     const bytes = sampleBytes();
     const model = decodeBytes(bytes);
@@ -155,21 +141,6 @@ describe.skipIf(!hasRealFile)('exportEditedFit against a real Edge 840 file', ()
     const model = decodeBytes(bytes);
     const out = exportEditedFit(bytes, model, model);
     expect(Buffer.from(out).equals(Buffer.from(bytes))).toBe(true);
-  });
-
-  it('time shift preserves size and every unknown proprietary message', () => {
-    const bytes = loadRealFile();
-    const model = decodeBytes(bytes);
-    const out = exportEditedFit(bytes, model, shiftTime(model, -90000));
-    expect(out.length).toBe(bytes.length);
-
-    // Same record structure at the raw level (nothing dropped).
-    expect(parseRawFit(out).records.length).toBe(parseRawFit(bytes).records.length);
-
-    const decoded = decodeBytes(out);
-    const fileIdBefore = model.entries.find((e) => e.mesgNum === Profile.MesgNum.FILE_ID)!.mesg;
-    const fileIdAfter = decoded.entries.find((e) => e.mesgNum === Profile.MesgNum.FILE_ID)!.mesg;
-    expect((fileIdAfter.timeCreated as Date).getTime()).toBe((fileIdBefore.timeCreated as Date).getTime() - 90000 * 1000);
   });
 
   it('lap split keeps everything outside the summary block byte-identical', () => {

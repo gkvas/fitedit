@@ -3,7 +3,6 @@ import { useEditorStore } from '../state/editorStore';
 import { exportEditedFit } from '../fit/raw/export';
 import { downloadBytes } from '../lib/download';
 import { DeviceForm } from './DeviceForm';
-import { ShiftTimeForm } from './ShiftTimeForm';
 
 export function Toolbar() {
   const model = useEditorStore((s) => s.model);
@@ -15,7 +14,6 @@ export function Toolbar() {
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);
   const [showDeviceForm, setShowDeviceForm] = useState(false);
-  const [showShiftTimeForm, setShowShiftTimeForm] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
   function download() {
@@ -40,15 +38,11 @@ export function Toolbar() {
       <button type="button" onClick={() => setShowDeviceForm(true)}>
         Change device
       </button>
-      <button type="button" onClick={() => setShowShiftTimeForm(true)}>
-        Shift time
-      </button>
       <button type="button" onClick={download}>
         Download
       </button>
       {downloadError && <span className="toolbar-error">{downloadError}</span>}
       {showDeviceForm && <DeviceForm onClose={() => setShowDeviceForm(false)} />}
-      {showShiftTimeForm && <ShiftTimeForm onClose={() => setShowShiftTimeForm(false)} />}
     </div>
   );
 }

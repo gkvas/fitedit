@@ -1,9 +1,8 @@
 import { Profile } from '@garmin/fitsdk';
 import type { FitMesg } from '../model';
-import { parseRawFit, finalizeFitBytes, type RawFitFile, type RawRecord, type RawFieldDef } from './parse';
+import { parseRawFit, finalizeFitBytes, type RawFitFile, type RawRecord, type RawFieldDef, type RawDefinition } from './parse';
 
 const FIT_EPOCH_MS = 631065600000;
-const TIMESTAMP_FIELD = 253;
 const MESSAGE_INDEX_FIELD = 254;
 
 // Base type codes (low 5 bits identify the type; bit 7 flags multi-byte).
@@ -25,8 +24,6 @@ const INVALID_BYTES: Record<number, number[]> = {
   0x90: [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
 };
 
-const UINT32_INVALID = 0xffffffff;
-
 interface ProfileField {
   num: number;
   name: string;
@@ -40,26 +37,6 @@ interface ProfileField {
 function profileFieldsOf(mesgNum: number): Record<number, ProfileField> {
   return (Profile.messages as Record<number, { fields: Record<number, ProfileField> }>)[mesgNum]?.fields ?? {};
 }
-
-/** Per-message field numbers holding dateTime/localDateTime values (both share the FIT epoch). */
-function buildDateTimeFieldMap(): Map<number, Set<number>> {
-  const map = new Map<number, Set<number>>();
-  for (const [mesgNum, mesg] of Object.entries(Profile.messages as Record<string, { fields: Record<number, ProfileField> }>)) {
-    for (const field of Object.values(mesg.fields)) {
-      if (field.type === 'dateTime' || field.type === 'localDateTime') {
-        let set = map.get(Number(mesgNum));
-        if (!set) {
-          set = new Set();
-          map.set(Number(mesgNum), set);
-        }
-        set.add(field.num);
-      }
-    }
-  }
-  return map;
-}
-
-const dateTimeFields = buildDateTimeFieldMap();
 
 function readU16(bytes: Uint8Array, offset: number, littleEndian: boolean): number {
   return littleEndian ? bytes[offset] | (bytes[offset + 1] << 8) : (bytes[offset] << 8) | bytes[offset + 1];
@@ -75,12 +52,6 @@ function writeU16(bytes: Uint8Array, offset: number, value: number, littleEndian
   }
 }
 
-function readU32(bytes: Uint8Array, offset: number, littleEndian: boolean): number {
-  return littleEndian
-    ? (bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0
-    : ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0;
-}
-
 function writeU32(bytes: Uint8Array, offset: number, value: number, littleEndian: boolean): void {
   if (littleEndian) {
     bytes[offset] = value & 0xff;
@@ -92,30 +63,6 @@ function writeU32(bytes: Uint8Array, offset: number, value: number, littleEndian
     bytes[offset + 1] = (value >>> 16) & 0xff;
     bytes[offset + 2] = (value >>> 8) & 0xff;
     bytes[offset + 3] = value & 0xff;
-  }
-}
-
-/**
- * Shifts every timestamp field in place by `deltaSeconds`. Covers all
- * profile fields typed dateTime/localDateTime, plus field 253 in messages
- * the profile doesn't know — 253 is the architected timestamp field number
- * across all FIT messages, so proprietary messages stay consistent with the
- * shifted activity. Invalid (unset) values are left alone.
- */
-export function shiftTimestampsInPlace(raw: RawFitFile, deltaSeconds: number): void {
-  const delta = Math.round(deltaSeconds);
-  if (delta === 0) return;
-  for (const record of raw.records) {
-    if (record.kind !== 'data') continue;
-    const known = dateTimeFields.get(record.globalMesgNum);
-    for (const field of record.def.fields) {
-      if (field.size !== 4) continue;
-      if (field.num !== TIMESTAMP_FIELD && !known?.has(field.num)) continue;
-      const at = record.offset + 1 + field.offset;
-      const value = readU32(raw.bytes, at, record.def.littleEndian);
-      if (value === UINT32_INVALID) continue;
-      writeU32(raw.bytes, at, (value + delta) >>> 0, record.def.littleEndian);
-    }
   }
 }
 
@@ -140,15 +87,15 @@ export function patchFileIdInPlace(raw: RawFitFile, change: RawDeviceChange): vo
   }
 }
 
-function invalidPayload(fields: RawFieldDef[], devFieldsSize: number): Uint8Array {
-  const payload = new Uint8Array(fields.length === 0 ? devFieldsSize : fields[fields.length - 1].offset + fields[fields.length - 1].size + devFieldsSize);
-  for (const field of fields) {
+function invalidPayload(def: RawDefinition): Uint8Array {
+  const payload = new Uint8Array(def.payloadSize);
+  for (const field of def.fields) {
     const pattern = INVALID_BYTES[field.baseType] ?? [0xff];
     for (let i = 0; i < field.size; i++) {
       payload[field.offset + i] = pattern[i % pattern.length];
     }
   }
-  payload.fill(0xff, payload.length - devFieldsSize);
+  payload.fill(0xff, payload.length - def.devFieldsSize);
   return payload;
 }
 
@@ -226,7 +173,12 @@ function isLapReferencedTimeInZone(raw: RawFitFile, record: RawRecord): boolean 
 export function spliceLaps(raw: RawFitFile, newLaps: FitMesg[]): Uint8Array {
   const lapRecords = raw.records.filter((r) => r.kind === 'data' && r.globalMesgNum === Profile.MesgNum.LAP);
   if (lapRecords.length === 0) throw new Error('File has no lap messages to replace.');
-  const template = lapRecords[0];
+  // A compressed-timestamp record's 2-bit local type lives in a different
+  // namespace than the normal 4-bit one, so it can't serve as the header of
+  // the plain data records we emit — the spliced laps would decode under
+  // whatever definition owns that slot.
+  const template = lapRecords.find((r) => (raw.bytes[r.offset] & 0x80) === 0);
+  if (!template) throw new Error('File has no plain-header lap record to use as a splice template.');
   const removed = new Set<RawRecord>(lapRecords);
   for (const record of raw.records) {
     if (isLapReferencedTimeInZone(raw, record)) removed.add(record);
@@ -244,7 +196,7 @@ export function spliceLaps(raw: RawFitFile, newLaps: FitMesg[]): Uint8Array {
   const lapBytes: Uint8Array[] = sorted.map((lap, index) => {
     const record = new Uint8Array(1 + template.def.payloadSize);
     record[0] = template.localType;
-    const payload = invalidPayload(template.def.fields, template.def.devFieldsSize);
+    const payload = invalidPayload(template.def);
     for (const field of template.def.fields) {
       const value =
         field.num === MESSAGE_INDEX_FIELD ? index : rawFieldValue(Profile.MesgNum.LAP, field.num, lap);
