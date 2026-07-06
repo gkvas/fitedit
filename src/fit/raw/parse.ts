@@ -75,15 +75,18 @@ export function parseRawFit(bytes: Uint8Array): RawFitFile {
       const localType = (hdr >> 5) & 0x3;
       const def = activeDefs.get(localType);
       if (!def) throw new RawFitParseError(`Data record at ${pos} references undefined local type ${localType}.`);
+      if (pos + 1 + def.payloadSize > dataEnd) throw new RawFitParseError(`Data record at ${pos} extends past the data section.`);
       records.push({ offset: pos, length: 1 + def.payloadSize, kind: 'data', localType, globalMesgNum: def.globalMesgNum, def });
       pos += 1 + def.payloadSize;
     } else if (hdr & 0x40) {
+      if (pos + 6 > dataEnd) throw new RawFitParseError(`Truncated definition record at ${pos}.`);
       const localType = hdr & 0xf;
       const hasDevFields = (hdr & 0x20) !== 0;
       const littleEndian = bytes[pos + 2] === 0;
       const globalMesgNum = littleEndian ? view.getUint16(pos + 3, true) : view.getUint16(pos + 3, false);
       const numFields = bytes[pos + 5];
       let p = pos + 6;
+      if (p + numFields * 3 > dataEnd) throw new RawFitParseError(`Truncated definition record at ${pos}.`);
       const fields: RawFieldDef[] = [];
       let payloadOffset = 0;
       for (let i = 0; i < numFields; i++) {
@@ -94,8 +97,10 @@ export function parseRawFit(bytes: Uint8Array): RawFitFile {
       }
       let devFieldsSize = 0;
       if (hasDevFields) {
+        if (p + 1 > dataEnd) throw new RawFitParseError(`Truncated definition record at ${pos}.`);
         const numDevFields = bytes[p];
         p += 1;
+        if (p + numDevFields * 3 > dataEnd) throw new RawFitParseError(`Truncated definition record at ${pos}.`);
         for (let i = 0; i < numDevFields; i++) {
           devFieldsSize += bytes[p + 1];
           p += 3;
@@ -109,6 +114,7 @@ export function parseRawFit(bytes: Uint8Array): RawFitFile {
       const localType = hdr & 0xf;
       const def = activeDefs.get(localType);
       if (!def) throw new RawFitParseError(`Data record at ${pos} references undefined local type ${localType}.`);
+      if (pos + 1 + def.payloadSize > dataEnd) throw new RawFitParseError(`Data record at ${pos} extends past the data section.`);
       records.push({ offset: pos, length: 1 + def.payloadSize, kind: 'data', localType, globalMesgNum: def.globalMesgNum, def });
       pos += 1 + def.payloadSize;
     }

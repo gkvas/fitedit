@@ -45,6 +45,21 @@ is byte-identical to the input. Lap-referenced `time_in_zone` messages are
 dropped when the lap layout changes, since their per-lap zone breakdown
 describes boundaries that no longer exist.
 
+## Privacy
+
+Your FIT file is decoded, edited, and re-exported entirely in the browser —
+its contents are never uploaded anywhere, and the production server sends a
+Content-Security-Policy that blocks the page from making network requests to
+anything but itself and the map tile server.
+
+The one caveat is the map itself: displaying your route fetches map tiles for
+the surrounding area from [OpenStreetMap](https://operations.osmfoundation.org/policies/tiles/)
+(`tile.openstreetmap.org`). The tile server therefore sees your IP address
+and, implicitly, the approximate location of the activity you're viewing —
+though never the track itself. This is inherent to any online map; if that's
+a concern, review OSM's privacy policy or swap the `TileLayer` URL in
+`src/components/MapView.tsx` for a self-hosted tile server.
+
 ## Getting started
 
 ```bash

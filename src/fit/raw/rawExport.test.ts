@@ -5,7 +5,7 @@ import path from 'path';
 import { Profile } from '@garmin/fitsdk';
 import { decodeFitFile } from '../decode';
 import { encodeFitFile } from '../encode';
-import { parseRawFit } from './parse';
+import { parseRawFit, RawFitParseError } from './parse';
 import { exportEditedFit } from './export';
 import { addLapBoundary } from '../operations/laps';
 import { changeDevice } from '../operations/device';
@@ -89,6 +89,20 @@ describe('parseRawFit', () => {
 
   it('rejects non-FIT data', () => {
     expect(() => parseRawFit(new TextEncoder().encode('definitely not a fit file'))).toThrow();
+  });
+
+  it('rejects a definition record whose field table extends past the data section', () => {
+    const bytes = sampleBytes();
+    const firstDef = parseRawFit(bytes).records.find((r) => r.kind === 'definition')!;
+    bytes[firstDef.offset + 5] = 0xff; // claim 255 fields
+    expect(() => parseRawFit(bytes)).toThrow(RawFitParseError);
+  });
+
+  it('rejects a data record that extends past the data section', () => {
+    const bytes = sampleBytes();
+    const firstDef = parseRawFit(bytes).records.find((r) => r.kind === 'definition')!;
+    bytes[firstDef.offset + 7] = 0xff; // inflate the first field's size so the payload overruns
+    expect(() => parseRawFit(bytes)).toThrow(RawFitParseError);
   });
 });
 
