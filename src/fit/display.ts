@@ -93,6 +93,54 @@ export interface LapBoundary {
   distanceMeters: number | null;
   avgHeartRate: number | null;
   avgPower: number | null;
+  normalizedPower: number | null;
+}
+
+const NP_WINDOW_SECONDS = 30;
+// Records more than this far apart are treated as a recording pause: the
+// gap is zero-filled instead of carrying the last power reading forward,
+// which would otherwise inflate NP across auto-pauses.
+const NP_GAP_FORWARD_FILL_LIMIT_SECONDS = 3;
+
+interface PowerSample {
+  timeMs: number;
+  power: number;
+}
+
+/**
+ * Normalized power over [startMs, endMs): resample record power to 1 Hz,
+ * take a 30 s rolling average, then the fourth root of the mean of its
+ * fourth powers. Returns null when there is less than one full window of
+ * data. `samples` must be sorted by time.
+ */
+function computeNormalizedPower(samples: PowerSample[], startMs: number, endMs: number): number | null {
+  const inLap = samples.filter((s) => s.timeMs >= startMs && s.timeMs < endMs);
+  if (inLap.length === 0) return null;
+
+  const perSecond: number[] = [];
+  for (let i = 0; i < inLap.length; i++) {
+    perSecond.push(inLap[i].power);
+    if (i + 1 < inLap.length) {
+      const gapSeconds = Math.round((inLap[i + 1].timeMs - inLap[i].timeMs) / 1000) - 1;
+      for (let g = 0; g < gapSeconds; g++) {
+        perSecond.push(g < NP_GAP_FORWARD_FILL_LIMIT_SECONDS ? inLap[i].power : 0);
+      }
+    }
+  }
+  if (perSecond.length < NP_WINDOW_SECONDS) return null;
+
+  let windowSum = 0;
+  let fourthPowerSum = 0;
+  let windowCount = 0;
+  for (let i = 0; i < perSecond.length; i++) {
+    windowSum += perSecond[i];
+    if (i >= NP_WINDOW_SECONDS) windowSum -= perSecond[i - NP_WINDOW_SECONDS];
+    if (i >= NP_WINDOW_SECONDS - 1) {
+      fourthPowerSum += (windowSum / NP_WINDOW_SECONDS) ** 4;
+      windowCount++;
+    }
+  }
+  return (fourthPowerSum / windowCount) ** 0.25;
 }
 
 /**
@@ -108,6 +156,11 @@ export function lapBoundariesOf(model: FitModel): LapBoundary[] {
   const laps = mesgsOf<LapMesg>(model, Profile.MesgNum.LAP)
     .filter((l) => asDate(l.startTime))
     .sort((a, b) => (asDate(a.startTime) as Date).getTime() - (asDate(b.startTime) as Date).getTime());
+
+  const powerSamples: PowerSample[] = mesgsOf<RecordMesg>(model, Profile.MesgNum.RECORD)
+    .filter((r) => r.timestamp instanceof Date && typeof r.power === 'number')
+    .map((r) => ({ timeMs: (r.timestamp as Date).getTime(), power: r.power as number }))
+    .sort((a, b) => a.timeMs - b.timeMs);
 
   return laps.map((lap, index) => {
     const startTime = asDate(lap.startTime);
@@ -126,6 +179,12 @@ export function lapBoundariesOf(model: FitModel): LapBoundary[] {
       distanceMeters: typeof lap.totalDistance === 'number' ? lap.totalDistance : null,
       avgHeartRate: typeof lap.avgHeartRate === 'number' ? lap.avgHeartRate : null,
       avgPower: typeof lap.avgPower === 'number' ? lap.avgPower : null,
+      normalizedPower:
+        typeof lap.normalizedPower === 'number'
+          ? lap.normalizedPower
+          : startTime && endTime
+            ? computeNormalizedPower(powerSamples, startTime.getTime(), endTime.getTime())
+            : null,
     };
   });
 }

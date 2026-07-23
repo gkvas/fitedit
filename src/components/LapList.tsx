@@ -38,6 +38,7 @@ export function LapList({
 
   const hasHeartRate = laps.some((lap) => lap.avgHeartRate !== null);
   const hasPower = laps.some((lap) => lap.avgPower !== null);
+  const hasNormalizedPower = laps.some((lap) => lap.normalizedPower !== null);
 
   return (
     <table className="lap-list">
@@ -49,6 +50,7 @@ export function LapList({
           <th>Distance</th>
           {hasHeartRate && <th>Avg HR</th>}
           {hasPower && <th>Avg Power</th>}
+          {hasNormalizedPower && <th>NP</th>}
           <th></th>
         </tr>
       </thead>
@@ -61,6 +63,7 @@ export function LapList({
             <td>{formatDistance(lap.distanceMeters)}</td>
             {hasHeartRate && <td>{formatNumber(lap.avgHeartRate, 'bpm')}</td>}
             {hasPower && <td>{formatNumber(lap.avgPower, 'W')}</td>}
+            {hasNormalizedPower && <td>{formatNumber(lap.normalizedPower, 'W')}</td>}
             <td>
               <button type="button" disabled={laps.length <= 1} onClick={() => onDeleteLap(lap.index)}>
                 Delete
